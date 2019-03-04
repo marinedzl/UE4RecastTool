@@ -29,6 +29,15 @@ protected:
 	void NavDataAutoUpdate_Execute(const FGuid SessionInstanceID);
 	bool NavDataAutoUpdate_CanExecute(const FGuid SessionInstanceID) const;
 	ECheckBoxState NavDataAutoUpdate_GetCheckState(const FGuid SessionInstanceID) const;
+
+
+	/** NavDataEnableDrawing ToggleButton */
+public:
+	const FUIAction NavDataEnableDrawing_Custom(const FGuid SessionInstanceID) const;
+protected:
+	void NavDataEnableDrawing_Execute(const FGuid SessionInstanceID);
+	bool NavDataEnableDrawing_CanExecute(const FGuid SessionInstanceID) const;
+	ECheckBoxState NavDataEnableDrawing_GetCheckState(const FGuid SessionInstanceID) const;
 	
 private:
 	void AddToolbarExtension(FToolBarBuilder& Builder);

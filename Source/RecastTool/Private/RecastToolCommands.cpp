@@ -6,6 +6,7 @@
 
 void FRecastToolCommands::RegisterCommands()
 {
+	UI_COMMAND(NavDataEnableDrawing, "NavDataEnableDrawing", "NavDataEnableDrawing", EUserInterfaceActionType::ToggleButton, FInputGesture());
 	UI_COMMAND(NavDataAutoUpdate, "NavDataAutoUpdate", "NavDataAutoUpdate", EUserInterfaceActionType::ToggleButton, FInputGesture());
 	UI_COMMAND(ExportNavMeshObj, "ExportNavMeshObj", "ExportNavMeshObj", EUserInterfaceActionType::Button, FInputGesture());
 	UI_COMMAND(ExportTileCache, "ExportTileCache", "ExportTileCache", EUserInterfaceActionType::Button, FInputGesture());

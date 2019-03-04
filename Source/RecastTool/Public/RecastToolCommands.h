@@ -20,6 +20,7 @@ public:
 
 public:
 	TSharedPtr< FUICommandInfo > NavDataAutoUpdate;
+	TSharedPtr< FUICommandInfo > NavDataEnableDrawing;
 	TSharedPtr< FUICommandInfo > ExportNavMeshObj;
 	TSharedPtr< FUICommandInfo > ExportTileCache;
 };

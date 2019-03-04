@@ -26,6 +26,7 @@ void FRecastToolModule::StartupModule()
 	
 	PluginCommands = MakeShareable(new FUICommandList);
 
+	PluginCommands->MapAction(FRecastToolCommands::Get().NavDataEnableDrawing, NavDataEnableDrawing_Custom(FGuid()));
 	PluginCommands->MapAction(FRecastToolCommands::Get().NavDataAutoUpdate, NavDataAutoUpdate_Custom(FGuid()));
 
 	PluginCommands->MapAction(
@@ -78,6 +79,7 @@ void FRecastToolModule::ExportTileCacheButtonClicked()
 	FMessageDialog::Open(EAppMsgType::Ok, msg);
 }
 
+// NavDataAutoUpdate Begin
 const FUIAction FRecastToolModule::NavDataAutoUpdate_Custom(const FGuid SessionInstanceID) const
 {
 	FUIAction UIAction;
@@ -103,8 +105,44 @@ ECheckBoxState FRecastToolModule::NavDataAutoUpdate_GetCheckState(const FGuid Se
 {
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+
 	return NavSystem->GetIsNavigationAutoUpdateEnabled() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
+// NavDataAutoUpdate End
+
+// NavDataEnableDrawing Begin
+const FUIAction FRecastToolModule::NavDataEnableDrawing_Custom(const FGuid SessionInstanceID) const
+{
+	FUIAction UIAction;
+	UIAction.ExecuteAction = FExecuteAction::CreateRaw(this, &FRecastToolModule::NavDataEnableDrawing_Execute, SessionInstanceID);
+	UIAction.CanExecuteAction = FCanExecuteAction::CreateRaw(this, &FRecastToolModule::NavDataEnableDrawing_CanExecute, SessionInstanceID);
+	UIAction.GetActionCheckState = FGetActionCheckState::CreateRaw(this, &FRecastToolModule::NavDataEnableDrawing_GetCheckState, SessionInstanceID);
+	return UIAction;
+}
+
+void FRecastToolModule::NavDataEnableDrawing_Execute(const FGuid SessionInstanceID)
+{
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
+	check(NavData);
+	NavData->SetNavRenderingEnabled(!NavData->IsDrawingEnabled());
+}
+
+bool FRecastToolModule::NavDataEnableDrawing_CanExecute(const FGuid SessionInstanceID) const
+{
+	return true;
+}
+
+ECheckBoxState FRecastToolModule::NavDataEnableDrawing_GetCheckState(const FGuid SessionInstanceID) const
+{
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
+	check(NavData);
+	return NavData->IsDrawingEnabled() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+// NavDataEnableDrawing End
 
 void FRecastToolModule::AddMenuExtension(FMenuBuilder& Builder)
 {
@@ -112,6 +150,7 @@ void FRecastToolModule::AddMenuExtension(FMenuBuilder& Builder)
 	Builder.AddSubMenu(FText::FromString("RecastTool"), FText::FromString("RecastTool"), FNewMenuDelegate::CreateLambda([](FMenuBuilder& Builder)
 	{
 		Builder.AddMenuEntry(FRecastToolCommands::Get().NavDataAutoUpdate);
+		Builder.AddMenuEntry(FRecastToolCommands::Get().NavDataEnableDrawing);
 		Builder.AddMenuEntry(FRecastToolCommands::Get().ExportNavMeshObj);
 		Builder.AddMenuEntry(FRecastToolCommands::Get().ExportTileCache);
 	}));
@@ -129,6 +168,7 @@ void FRecastToolModule::AddToolbarExtension(FToolBarBuilder& Builder)
 		MenuBuilder.BeginSection("RecastTool", LOCTEXT("RecastTool", "RecastTool"));
 
 		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().NavDataAutoUpdate);
+		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().NavDataEnableDrawing);
 		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().ExportNavMeshObj);
 		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().ExportTileCache);
 
