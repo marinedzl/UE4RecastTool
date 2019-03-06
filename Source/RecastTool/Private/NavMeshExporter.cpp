@@ -109,21 +109,21 @@ namespace Recast
 
 using namespace Recast;
 
-bool NavMeshExporter::ExportNavMeshObj(FText& err)
+bool NavMeshExporter::ExportNavGeom(FText& err)
 {
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
 	if (NavData == NULL)
 	{
-		err = FText::FromString(TEXT("ExportNavMesh Failed ,None NavData Found ,Build Path Data First"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,None NavData Found ,Build Path Data First"));
 		return false;
 	}
 
 	ARecastNavMesh* RecastNavmesh = StaticCast<ARecastNavMesh*>(NavData);
 	if (RecastNavmesh == NULL)
 	{
-		err = FText::FromString(TEXT("ExportStaticNavMesh Failed ,The NavData Is Not a ARecastNavMesh"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,The NavData Is Not a ARecastNavMesh"));
 		return false;
 	}
 
@@ -139,7 +139,7 @@ bool NavMeshExporter::ExportNavMeshObj(FText& err)
 
 	if (SaveFilePath.Num() != 1)
 	{
-		err = FText::FromString(TEXT("ExportStaticNavMesh Failed ,Please Choose A Path to Save The Navmesh"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,Please Choose A Path to Save The Navmesh"));
 		return false;
 	}
 
@@ -150,7 +150,7 @@ bool NavMeshExporter::ExportNavMeshObj(FText& err)
 	return true;
 }
 
-bool NavMeshExporter::ExportTileCacheData(FText& err)
+bool NavMeshExporter::ExportTileCache(FText& err)
 {
 	bool ret = false;
 
@@ -166,7 +166,7 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 
 	if (SaveFilePath.Num() != 1)
 	{
-		err = FText::FromString(TEXT("ExportStaticNavMesh Failed ,Please Choose A Path to Save The Navmesh"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,Please Choose A Path to Save The Navmesh"));
 		return false;
 	}
 
@@ -175,14 +175,14 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
 	if (NavData == NULL)
 	{
-		err = FText::FromString(TEXT("ExportNavMesh Failed ,None NavData Found ,Build Path Data First"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,None NavData Found ,Build Path Data First"));
 		return false;
 	}
 
 	ARecastNavMesh* RecastNavmesh = StaticCast<ARecastNavMesh*>(NavData);
 	if (RecastNavmesh == NULL)
 	{
-		err = FText::FromString(TEXT("ExportStaticNavMesh Failed ,The NavData Is Not a ARecastNavMesh"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,The NavData Is Not a ARecastNavMesh"));
 		return false;
 	}
 
@@ -190,7 +190,7 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 	const auto tilecacheMap = RecastNavmesh->GetAllTileCaches();
 	if (tilecacheMap == nullptr || !tilecacheMap->Num())
 	{
-		err = FText::FromString(TEXT("ExportStaticNavMesh Failed ,TileLayer cache is not exist ,please build path manually"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,TileLayer cache is not exist ,please build path manually"));
 		return false;
 	}
 
@@ -199,8 +199,9 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 	fileHeader.magic = TILECACHESET_MAGIC;
 	fileHeader.version = TILECACHESET_VERSION;
 
-	const FRecastBuildConfig& Config = ((FRecastNavMeshGenerator*)RecastNavmesh->GetGenerator())->GetConfig();
-	FBox Bound = Unreal2RecastBox(((FRecastNavMeshGenerator*)RecastNavmesh->GetGenerator())->GetTotalBounds());
+	FRecastNavMeshGenerator* NavDataGenerator = (FRecastNavMeshGenerator*)(NavData->GetGenerator());
+	const FRecastBuildConfig& Config = NavDataGenerator->GetConfig();
+	FBox Bound = Unreal2RecastBox(NavDataGenerator->GetTotalBounds());
 
 	int gw = 0, gh = 0;
 	rcCalcGridSize(&Bound.Min.X, &Bound.Max.X, Config.cs, &gw, &gh);
@@ -246,7 +247,7 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 	IFileHandle* FileHandle = PlatformFile.OpenWrite(*(SaveFilePath[0]));
 	if (!FileHandle)
 	{
-		err = FText::FromString(TEXT("ExportStaticNavMesh Failed , Create file faied"));
+		err = FText::FromString(TEXT("ExportNavGeom Failed , Create file faied"));
 		return false;
 	}
 
@@ -263,7 +264,7 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 			dtTileCacheLayerHeader *ueLayerHeader = nullptr;
 			if (!RecastNavmesh->DecompressTileCacheLayer(tilecache, &ueLayerHeader, &ueLayer))
 			{
-				err = FText::FromString(TEXT("ExportStaticNavMesh Failed ,DecompressTileCacheLayer Failed"));
+				err = FText::FromString(TEXT("ExportNavGeom Failed ,DecompressTileCacheLayer Failed"));
 				goto Exit0;
 			}
 
@@ -328,6 +329,246 @@ bool NavMeshExporter::ExportTileCacheData(FText& err)
 	ret = true;
 
 Exit0:
+	if (FileHandle)
+		delete FileHandle;
+	return ret;
+}
+
+FORCEINLINE void GrowConvexHull(const float ExpandBy, const TArray<FVector>& Verts, TArray<FVector>& OutResult)
+{
+	if (Verts.Num() < 3)
+	{
+		return;
+	}
+
+	struct FSimpleLine
+	{
+		FVector P1, P2;
+
+		FSimpleLine() {}
+
+		FSimpleLine(FVector Point1, FVector Point2)
+			: P1(Point1), P2(Point2)
+		{
+
+		}
+		static FVector Intersection(const FSimpleLine& Line1, const FSimpleLine& Line2)
+		{
+			const float A1 = Line1.P2.X - Line1.P1.X;
+			const float B1 = Line2.P1.X - Line2.P2.X;
+			const float C1 = Line2.P1.X - Line1.P1.X;
+
+			const float A2 = Line1.P2.Y - Line1.P1.Y;
+			const float B2 = Line2.P1.Y - Line2.P2.Y;
+			const float C2 = Line2.P1.Y - Line1.P1.Y;
+
+			const float Denominator = A2 * B1 - A1 * B2;
+			if (Denominator != 0)
+			{
+				const float t = (B1*C2 - B2 * C1) / Denominator;
+				return Line1.P1 + t * (Line1.P2 - Line1.P1);
+			}
+
+			return FVector::ZeroVector;
+		}
+	};
+
+	TArray<FVector> AllVerts(Verts);
+	AllVerts.Add(Verts[0]);
+	AllVerts.Add(Verts[1]);
+
+	const int32 VertsCount = AllVerts.Num();
+	const FQuat Rotation90(FVector(0, 0, 1), FMath::DegreesToRadians(90));
+
+	float RotationAngle = MAX_FLT;
+	for (int32 Index = 0; Index < VertsCount - 2; ++Index)
+	{
+		const FVector& V1 = AllVerts[Index + 0];
+		const FVector& V2 = AllVerts[Index + 1];
+		const FVector& V3 = AllVerts[Index + 2];
+
+		const FVector V01 = (V1 - V2).GetSafeNormal();
+		const FVector V12 = (V2 - V3).GetSafeNormal();
+		const FVector NV1 = Rotation90.RotateVector(V01);
+		const float d = FVector::DotProduct(NV1, V12);
+
+		if (d < 0)
+		{
+			// CW
+			RotationAngle = -90;
+			break;
+		}
+		else if (d > 0)
+		{
+			//CCW
+			RotationAngle = 90;
+			break;
+		}
+	}
+
+	// check if we detected CW or CCW direction
+	if (RotationAngle >= BIG_NUMBER)
+	{
+		return;
+	}
+
+	const float ExpansionThreshold = 2 * ExpandBy;
+	const float ExpansionThresholdSQ = ExpansionThreshold * ExpansionThreshold;
+	const FQuat Rotation(FVector(0, 0, 1), FMath::DegreesToRadians(RotationAngle));
+	FSimpleLine PreviousLine;
+	OutResult.Reserve(Verts.Num());
+	for (int32 Index = 0; Index < VertsCount - 2; ++Index)
+	{
+		const FVector& V1 = AllVerts[Index + 0];
+		const FVector& V2 = AllVerts[Index + 1];
+		const FVector& V3 = AllVerts[Index + 2];
+
+		FSimpleLine Line1;
+		if (Index > 0)
+		{
+			Line1 = PreviousLine;
+		}
+		else
+		{
+			const FVector V01 = (V1 - V2).GetSafeNormal();
+			const FVector N1 = Rotation.RotateVector(V01).GetSafeNormal();
+			const FVector MoveDir1 = N1 * ExpandBy;
+			Line1 = FSimpleLine(V1 + MoveDir1, V2 + MoveDir1);
+		}
+
+		const FVector V12 = (V2 - V3).GetSafeNormal();
+		const FVector N2 = Rotation.RotateVector(V12).GetSafeNormal();
+		const FVector MoveDir2 = N2 * ExpandBy;
+		const FSimpleLine Line2(V2 + MoveDir2, V3 + MoveDir2);
+
+		const FVector NewPoint = FSimpleLine::Intersection(Line1, Line2);
+		if (NewPoint == FVector::ZeroVector)
+		{
+			// both lines are parallel so just move our point by expansion distance
+			OutResult.Add(V2 + MoveDir2);
+		}
+		else
+		{
+			const FVector VectorToNewPoint = NewPoint - V2;
+			const float DistToNewVector = VectorToNewPoint.SizeSquared2D();
+			if (DistToNewVector > ExpansionThresholdSQ)
+			{
+				//clamp our point to not move to far from original location
+				const FVector HelpPos = V2 + VectorToNewPoint.GetSafeNormal2D() * ExpandBy * 1.4142;
+				OutResult.Add(HelpPos);
+			}
+			else
+			{
+				OutResult.Add(NewPoint);
+			}
+		}
+
+		PreviousLine = Line2;
+	}
+}
+
+bool NavMeshExporter::ExportNavArea(FText& err)
+{
+	bool ret = false;
+
+	TArray<FString> SaveFilePath;
+	FDesktopPlatformModule::Get()->SaveFileDialog(NULL,
+		TEXT("Choose A Path to Save The Navmesh"),
+		TEXT(""),
+		GEditor->GetEditorWorldContext().World()->GetMapName(),
+		TEXT("Tilecache File|*.obst"),
+		0,
+		SaveFilePath
+	);
+
+	if (SaveFilePath.Num() != 1)
+	{
+		err = FText::FromString(TEXT("ExportNavArea Failed ,Please Choose A Path to Save The Navmesh"));
+		return false;
+	}
+
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	ANavigationData* _NavData = NavSys->GetDefaultNavDataInstance();
+	if (_NavData == NULL)
+	{
+		err = FText::FromString(TEXT("ExportNavMesh Failed ,None NavData Found ,Build Path Data First"));
+		return false;
+	}
+
+	ARecastNavMesh* NavData = StaticCast<ARecastNavMesh*>(_NavData);
+	if (NavData == NULL)
+	{
+		err = FText::FromString(TEXT("ExportNavArea Failed ,The NavData Is Not a ARecastNavMesh"));
+		return false;
+	}
+
+	FRecastNavMeshGenerator* NavDataGenerator = (FRecastNavMeshGenerator*)(NavData->GetGenerator());
+	const FRecastBuildConfig& Config = NavDataGenerator->GetConfig();
+	FBox TotalBounds = NavDataGenerator->GetTotalBounds();
+
+	struct FAreaExportData
+	{
+		FConvexNavAreaData Convex;
+		uint8 AreaId;
+	};
+	TArray<FAreaExportData> AreaExport;
+
+	for (FNavigationOctree::TConstElementBoxIterator<FNavigationOctree::DefaultStackAllocator> It(*NavSys->GetNavOctree(), TotalBounds);
+		It.HasPendingElements();
+		It.Advance())
+	{
+		const FNavigationOctreeElement& Element = It.GetCurrentElement();
+		const TArray<FAreaNavModifier>& AreaMods = Element.Data->Modifiers.GetAreas();
+		for (int32 i = 0; i < AreaMods.Num(); i++)
+		{
+			FAreaExportData ExportInfo;
+			ExportInfo.AreaId = NavData->GetAreaID(AreaMods[i].GetAreaClass());
+
+			if (AreaMods[i].GetShapeType() == ENavigationShapeType::Convex)
+			{
+				AreaMods[i].GetConvex(ExportInfo.Convex);
+
+				TArray<FVector> ConvexVerts;
+				GrowConvexHull(Config.AgentRadius, ExportInfo.Convex.Points, ConvexVerts);
+				ExportInfo.Convex.MinZ -= Config.ch;
+				ExportInfo.Convex.MaxZ += Config.ch;
+				ExportInfo.Convex.Points = ConvexVerts;
+
+				AreaExport.Add(ExportInfo);
+			}
+		}
+	}
+
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	IFileHandle* FileHandle = PlatformFile.OpenWrite(*(SaveFilePath[0]));
+	if (!FileHandle)
+	{
+		err = FText::FromString(TEXT("ExportNavArea Failed , Create file faied"));
+		return false;
+	}
+
+	FString AreaExportStr = TEXT("# Area export\n");
+
+	for (int32 i = 0; i < AreaExport.Num(); i++)
+	{
+		const FAreaExportData& ExportInfo = AreaExport[i];
+		AreaExportStr += FString::Printf(TEXT("\na %d %d %f %f\n"),
+			ExportInfo.AreaId, ExportInfo.Convex.Points.Num(), ExportInfo.Convex.MinZ * UnitScaling, ExportInfo.Convex.MaxZ * UnitScaling);
+
+		for (int32 iv = 0; iv < ExportInfo.Convex.Points.Num(); iv++)
+		{
+			FVector Pt = Unreal2RecastPoint(ExportInfo.Convex.Points[iv]);
+			AreaExportStr += FString::Printf(TEXT("%f %f %f\n"), Pt.X * UnitScaling, Pt.Y * UnitScaling, Pt.Z * UnitScaling);
+		}
+	}
+
+	auto AnsiAdditionalData = StringCast<ANSICHAR>(*AreaExportStr);
+	FileHandle->Write((const uint8*)AnsiAdditionalData.Get(), AnsiAdditionalData.Length());
+
+	FileHandle->Flush();
+	ret = true;
+
 	if (FileHandle)
 		delete FileHandle;
 	return ret;

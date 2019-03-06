@@ -3,6 +3,7 @@
 class NavMeshExporter
 {
 public:
-	static bool ExportTileCacheData(FText& err);
-	static bool ExportNavMeshObj(FText& err);
+	static bool ExportTileCache(FText& err);
+	static bool ExportNavGeom(FText& err);
+	static bool ExportNavArea(FText& err);
 };

@@ -18,8 +18,9 @@ public:
 
 	/** ExportNavMesh Button */
 public:
-	void ExportNavMeshButtonClicked();
+	void ExportNavGeomButtonClicked();
 	void ExportTileCacheButtonClicked();
+	void ExportNavAreaButtonClicked();
 
 
 	/** NavDataAutoUpdate ToggleButton */

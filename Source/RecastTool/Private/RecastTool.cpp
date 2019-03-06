@@ -30,13 +30,18 @@ void FRecastToolModule::StartupModule()
 	PluginCommands->MapAction(FRecastToolCommands::Get().NavDataAutoUpdate, NavDataAutoUpdate_Custom(FGuid()));
 
 	PluginCommands->MapAction(
-		FRecastToolCommands::Get().ExportNavMeshObj,
-		FExecuteAction::CreateRaw(this, &FRecastToolModule::ExportNavMeshButtonClicked),
+		FRecastToolCommands::Get().ExportNavGeom,
+		FExecuteAction::CreateRaw(this, &FRecastToolModule::ExportNavGeomButtonClicked),
 		FCanExecuteAction());
 
 	PluginCommands->MapAction(
 		FRecastToolCommands::Get().ExportTileCache,
 		FExecuteAction::CreateRaw(this, &FRecastToolModule::ExportTileCacheButtonClicked),
+		FCanExecuteAction());
+
+	PluginCommands->MapAction(
+		FRecastToolCommands::Get().ExportNavArea,
+		FExecuteAction::CreateRaw(this, &FRecastToolModule::ExportNavAreaButtonClicked),
 		FCanExecuteAction());
 		
 	FLevelEditorModule& LevelEditorModule = FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
@@ -65,17 +70,24 @@ void FRecastToolModule::ShutdownModule()
 	FRecastToolCommands::Unregister();
 }
 
-void FRecastToolModule::ExportNavMeshButtonClicked()
+void FRecastToolModule::ExportNavGeomButtonClicked()
 {
-	FText msg = FText::FromString(TEXT("ExportNavMesh Successful!"));
-	NavMeshExporter::ExportNavMeshObj(msg);
+	FText msg = FText::FromString(TEXT("ExportNavGeom Successful!"));
+	NavMeshExporter::ExportNavGeom(msg);
 	FMessageDialog::Open(EAppMsgType::Ok, msg);
 }
 
 void FRecastToolModule::ExportTileCacheButtonClicked()
 {
 	FText msg = FText::FromString(TEXT("ExportTileCache Successful!"));
-	NavMeshExporter::ExportTileCacheData(msg);
+	NavMeshExporter::ExportTileCache(msg);
+	FMessageDialog::Open(EAppMsgType::Ok, msg);
+}
+
+void FRecastToolModule::ExportNavAreaButtonClicked()
+{
+	FText msg = FText::FromString(TEXT("ExportNavArea Successful!"));
+	NavMeshExporter::ExportNavArea(msg);
 	FMessageDialog::Open(EAppMsgType::Ok, msg);
 }
 
@@ -151,8 +163,9 @@ void FRecastToolModule::AddMenuExtension(FMenuBuilder& Builder)
 	{
 		Builder.AddMenuEntry(FRecastToolCommands::Get().NavDataAutoUpdate);
 		Builder.AddMenuEntry(FRecastToolCommands::Get().NavDataEnableDrawing);
-		Builder.AddMenuEntry(FRecastToolCommands::Get().ExportNavMeshObj);
+		Builder.AddMenuEntry(FRecastToolCommands::Get().ExportNavGeom);
 		Builder.AddMenuEntry(FRecastToolCommands::Get().ExportTileCache);
+		Builder.AddMenuEntry(FRecastToolCommands::Get().ExportNavArea);
 	}));
 	Builder.EndSection();
 }
@@ -169,8 +182,9 @@ void FRecastToolModule::AddToolbarExtension(FToolBarBuilder& Builder)
 
 		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().NavDataAutoUpdate);
 		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().NavDataEnableDrawing);
-		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().ExportNavMeshObj);
+		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().ExportNavGeom);
 		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().ExportTileCache);
+		MenuBuilder.AddMenuEntry(FRecastToolCommands::Get().ExportNavArea);
 
 		MenuBuilder.EndSection();
 
