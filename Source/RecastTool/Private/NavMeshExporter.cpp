@@ -509,6 +509,7 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 
 	struct FAreaExportData
 	{
+		FString Name;
 		FConvexNavAreaData Convex;
 		uint8 AreaId;
 	};
@@ -534,6 +535,7 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 				ExportInfo.Convex.MinZ -= Config.ch;
 				ExportInfo.Convex.MaxZ += Config.ch;
 				ExportInfo.Convex.Points = ConvexVerts;
+				ExportInfo.Name = Element.GetOwner()->GetName();
 
 				AreaExport.Add(ExportInfo);
 			}
@@ -553,7 +555,7 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 	for (int32 i = 0; i < AreaExport.Num(); i++)
 	{
 		const FAreaExportData& ExportInfo = AreaExport[i];
-		AreaExportStr += FString::Printf(TEXT("\na %d %d %f %f\n"),
+		AreaExportStr += FString::Printf(TEXT("\na %s %d %d %f %f\n"), *ExportInfo.Name,
 			ExportInfo.AreaId, ExportInfo.Convex.Points.Num(), ExportInfo.Convex.MinZ * UnitScaling, ExportInfo.Convex.MaxZ * UnitScaling);
 
 		for (int32 iv = 0; iv < ExportInfo.Convex.Points.Num(); iv++)
