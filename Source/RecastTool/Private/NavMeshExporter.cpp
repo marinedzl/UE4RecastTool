@@ -550,12 +550,12 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 		return false;
 	}
 
-	FString AreaExportStr = TEXT("# Area export\n");
+	FString AreaExportStr = TEXT("\n# Area export\n");
 
 	for (int32 i = 0; i < AreaExport.Num(); i++)
 	{
 		const FAreaExportData& ExportInfo = AreaExport[i];
-		AreaExportStr += FString::Printf(TEXT("\na %s %d %d %f %f\n"), *ExportInfo.Name,
+		AreaExportStr += FString::Printf(TEXT("\nae %s %d %d %f %f\n"), *ExportInfo.Name,
 			ExportInfo.AreaId, ExportInfo.Convex.Points.Num(), ExportInfo.Convex.MinZ * UnitScaling, ExportInfo.Convex.MaxZ * UnitScaling);
 
 		for (int32 iv = 0; iv < ExportInfo.Convex.Points.Num(); iv++)
@@ -565,7 +565,16 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 		}
 	}
 
-	auto AnsiAdditionalData = StringCast<ANSICHAR>(*AreaExportStr);
+	FString AdditionalData;
+
+	AdditionalData += FString::Printf(TEXT("# AgentHeight\n"));
+	AdditionalData += FString::Printf(TEXT("rd_agh %5.5f\n"), Config.AgentHeight * UnitScaling);
+	AdditionalData += FString::Printf(TEXT("# AgentRadius\n"));
+	AdditionalData += FString::Printf(TEXT("rd_agr %5.5f\n"), Config.AgentRadius * UnitScaling);
+
+	AdditionalData += AreaExportStr;
+
+	auto AnsiAdditionalData = StringCast<ANSICHAR>(*AdditionalData);
 	FileHandle->Write((const uint8*)AnsiAdditionalData.Get(), AnsiAdditionalData.Length());
 
 	FileHandle->Flush();
