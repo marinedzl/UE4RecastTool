@@ -137,13 +137,17 @@ void FRecastToolModule::NavDataEnableDrawing_Execute(const FGuid SessionInstance
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
-	check(NavData);
+	if (!NavData)
+		return;
 	NavData->SetNavRenderingEnabled(!NavData->IsDrawingEnabled());
 }
 
 bool FRecastToolModule::NavDataEnableDrawing_CanExecute(const FGuid SessionInstanceID) const
 {
-	return true;
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
+	return NavData;
 }
 
 ECheckBoxState FRecastToolModule::NavDataEnableDrawing_GetCheckState(const FGuid SessionInstanceID) const
@@ -151,7 +155,8 @@ ECheckBoxState FRecastToolModule::NavDataEnableDrawing_GetCheckState(const FGuid
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
-	check(NavData);
+	if (!NavData)
+		return ECheckBoxState::Unchecked;
 	return NavData->IsDrawingEnabled() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
 // NavDataEnableDrawing End
