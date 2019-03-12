@@ -20,7 +20,7 @@ public:
 public:
 	void ExportNavGeomButtonClicked();
 	void ExportTileCacheButtonClicked();
-	void ExportNavAreaButtonClicked();
+	void ExportGeomSetButtonClicked();
 
 
 	/** NavDataAutoUpdate ToggleButton */

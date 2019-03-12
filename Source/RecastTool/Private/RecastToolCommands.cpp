@@ -10,7 +10,7 @@ void FRecastToolCommands::RegisterCommands()
 	UI_COMMAND(NavDataAutoUpdate, "NavDataAutoUpdate", "NavDataAutoUpdate", EUserInterfaceActionType::ToggleButton, FInputGesture());
 	UI_COMMAND(ExportNavGeom, "ExportNavGeom", "ExportNavGeom", EUserInterfaceActionType::Button, FInputGesture());
 	UI_COMMAND(ExportTileCache, "ExportTileCache", "ExportTileCache", EUserInterfaceActionType::Button, FInputGesture());
-	UI_COMMAND(ExportNavArea, "ExportNavArea", "ExportNavArea", EUserInterfaceActionType::Button, FInputGesture());
+	UI_COMMAND(ExportGeomSet, "ExportGeomSet", "ExportGeomSet", EUserInterfaceActionType::Button, FInputGesture());
 }
 
 #undef LOCTEXT_NAMESPACE

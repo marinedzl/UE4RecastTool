@@ -23,5 +23,5 @@ public:
 	TSharedPtr< FUICommandInfo > NavDataEnableDrawing;
 	TSharedPtr< FUICommandInfo > ExportNavGeom;
 	TSharedPtr< FUICommandInfo > ExportTileCache;
-	TSharedPtr< FUICommandInfo > ExportNavArea;
+	TSharedPtr< FUICommandInfo > ExportGeomSet;
 };

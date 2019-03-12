@@ -16,6 +16,10 @@
 #include "Detour/DetourCommon.h"
 #include "DetourTileCache/DetourTileCacheBuilder.h"
 #include "fastlz.h"
+/*
+#define LZ4_DISABLE_DEPRECATE_WARNINGS
+#include "lz4.h"
+*/
 
 namespace
 {
@@ -84,6 +88,30 @@ namespace Recast
 	const int DT_MAX_LAYER_PER_TILE = 8;
 	const int DT_MAX_DYNAMIC_OBSTACLES = 64;
 
+	struct DummyCompressor : public dtTileCacheCompressor
+	{
+		virtual int maxCompressedSize(const int bufferSize)
+		{
+			return bufferSize;
+		}
+
+		virtual dtStatus compress(const unsigned char* buffer, const int bufferSize,
+			unsigned char* compressed, const int, int* compressedSize)
+		{
+			memcpy(compressed, buffer, bufferSize);
+			*compressedSize = bufferSize;
+			return DT_SUCCESS;
+		}
+
+		virtual dtStatus decompress(const unsigned char* compressed, const int compressedSize,
+			unsigned char* buffer, const int maxBufferSize, int* bufferSize)
+		{
+			memcpy(buffer, compressed, compressedSize);
+			*bufferSize = compressedSize;
+			return DT_SUCCESS;
+		}
+	};
+
 	struct FastLZCompressor : public dtTileCacheCompressor
 	{
 		virtual int maxCompressedSize(const int bufferSize)
@@ -92,7 +120,7 @@ namespace Recast
 		}
 
 		virtual dtStatus compress(const unsigned char* buffer, const int bufferSize,
-			unsigned char* compressed, const int /*maxCompressedSize*/, int* compressedSize)
+			unsigned char* compressed, const int maxCompressedSize, int* compressedSize)
 		{
 			*compressedSize = fastlz_compress((const void *const)buffer, bufferSize, compressed);
 			return DT_SUCCESS;
@@ -105,33 +133,77 @@ namespace Recast
 			return *bufferSize < 0 ? DT_FAILURE : DT_SUCCESS;
 		}
 	};
+
+	/*
+	struct LZ4Compressor : public dtTileCacheCompressor
+	{
+		virtual int maxCompressedSize(const int bufferSize)
+		{
+			return LZ4_compressBound(bufferSize);
+		}
+
+		virtual dtStatus compress(const unsigned char* buffer, const int bufferSize,
+			unsigned char* compressed, const int maxCompressedSize, int* compressedSize)
+		{
+			*compressedSize = LZ4_compress_default((const char *const)buffer, (char*)compressed, bufferSize, maxCompressedSize);
+			return DT_SUCCESS;
+		}
+
+		virtual dtStatus decompress(const unsigned char* compressed, const int compressedSize,
+			unsigned char* buffer, const int maxBufferSize, int* bufferSize)
+		{
+			*bufferSize = LZ4_decompress_safe((const char*)compressed, (char*)buffer, compressedSize, maxBufferSize);
+			return *bufferSize < 0 ? DT_FAILURE : DT_SUCCESS;
+		}
+	}; 
+	*/
 }
 
 using namespace Recast;
 
+void TransformVertexSoupToRecast(const TArray<FVector>& VertexSoup, TNavStatArray<FVector>& Verts, TNavStatArray<int32>& Faces)
+{
+	if (VertexSoup.Num() == 0)
+	{
+		return;
+	}
+
+	check(VertexSoup.Num() % 3 == 0);
+
+	const int32 StaticFacesCount = VertexSoup.Num() / 3;
+	int32 VertsCount = Verts.Num();
+	const FVector* Vertex = VertexSoup.GetData();
+
+	for (int32 k = 0; k < StaticFacesCount; ++k, Vertex += 3)
+	{
+		Verts.Add(Unreal2RecastPoint(Vertex[0]));
+		Verts.Add(Unreal2RecastPoint(Vertex[1]));
+		Verts.Add(Unreal2RecastPoint(Vertex[2]));
+		Faces.Add(VertsCount + 2);
+		Faces.Add(VertsCount + 1);
+		Faces.Add(VertsCount + 0);
+
+		VertsCount += 3;
+	}
+}
+
+// see FRecastGeometryCache::FRecastGeometryCache(const uint8* Memory)
+void GetRecastGeometryCacheFromData(FRecastGeometryCache& self, const uint8* Memory)
+{
+	self.Header = *((FRecastGeometryCache::FHeader*)Memory);
+	self.Verts = (float*)(Memory + sizeof(FRecastGeometryCache));
+	self.Indices = (int32*)(Memory + sizeof(FRecastGeometryCache) + (sizeof(float) * self.Header.NumVerts * 3));
+}
+
 bool NavMeshExporter::ExportNavGeom(FText& err)
 {
 	UWorld* World = GEditor->GetEditorWorldContext().World();
-	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
-	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
-	if (NavData == NULL)
-	{
-		err = FText::FromString(TEXT("ExportNavGeom Failed ,None NavData Found ,Build Path Data First"));
-		return false;
-	}
-
-	ARecastNavMesh* RecastNavmesh = StaticCast<ARecastNavMesh*>(NavData);
-	if (RecastNavmesh == NULL)
-	{
-		err = FText::FromString(TEXT("ExportNavGeom Failed ,The NavData Is Not a ARecastNavMesh"));
-		return false;
-	}
 
 	TArray<FString> SaveFilePath;
 	FDesktopPlatformModule::Get()->SaveFileDialog(NULL,
 		TEXT("Choose A Path to Save The Navmesh"),
 		TEXT(""),
-		GEditor->GetEditorWorldContext().World()->GetMapName(),
+		World->GetMapName(),
 		TEXT("Navmesh File|*.obj"),
 		0,
 		SaveFilePath
@@ -143,9 +215,104 @@ bool NavMeshExporter::ExportNavGeom(FText& err)
 		return false;
 	}
 
-	// 记得修改RecastNavMeshGenerator.cpp里的ExportGeomToOBJFile，单位要缩小100才能被RecastDemo使用
-	FNavDataGenerator* generator = RecastNavmesh->GetGenerator();
-	generator->ExportNavigationData(*(SaveFilePath[0]));
+	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+
+	ANavigationData* NavData = NavSys->GetDefaultNavDataInstance();
+	if (NavData == NULL)
+	{
+		err = FText::FromString(TEXT("ExportNavGeom Failed ,None NavData Found ,Build Path Data First"));
+		return false;
+	}
+
+	FRecastNavMeshGenerator* NavDataGenerator = (FRecastNavMeshGenerator*)(NavData->GetGenerator());
+	const FRecastBuildConfig& Config = NavDataGenerator->GetConfig();
+	FBox TotalBounds = NavDataGenerator->GetTotalBounds();
+
+	// feed data from octtree and mark for rebuild				
+	TNavStatArray<float> CoordBuffer;
+	TNavStatArray<int32> IndexBuffer;
+
+	for (FNavigationOctree::TConstElementBoxIterator<FNavigationOctree::DefaultStackAllocator> It(*NavSys->GetNavOctree(), TotalBounds);
+		It.HasPendingElements();
+		It.Advance())
+	{
+		const FNavigationOctreeElement& Element = It.GetCurrentElement();
+		const bool bExportGeometry = Element.Data->HasGeometry() && Element.ShouldUseGeometry(NavDataGenerator->GetOwner()->GetConfig());
+
+		if (bExportGeometry && Element.Data->CollisionData.Num())
+		{
+			FRecastGeometryCache CachedGeometry;
+			GetRecastGeometryCacheFromData(CachedGeometry, Element.Data->CollisionData.GetData());
+			IndexBuffer.Reserve(IndexBuffer.Num() + (CachedGeometry.Header.NumFaces * 3));
+			CoordBuffer.Reserve(CoordBuffer.Num() + (CachedGeometry.Header.NumVerts * 3));
+			for (int32 i = 0; i < CachedGeometry.Header.NumFaces * 3; i++)
+			{
+				IndexBuffer.Add(CachedGeometry.Indices[i] + CoordBuffer.Num() / 3);
+			}
+			for (int32 i = 0; i < CachedGeometry.Header.NumVerts * 3; i++)
+			{
+				CoordBuffer.Add(CachedGeometry.Verts[i]);
+			}
+		}
+	}
+
+	for (int32 LevelIndex = 0; LevelIndex < World->GetNumLevels(); ++LevelIndex)
+	{
+		const ULevel* const Level = World->GetLevel(LevelIndex);
+		if (Level == NULL)
+		{
+			continue;
+		}
+
+		const TArray<FVector>* LevelGeom = Level->GetStaticNavigableGeometry();
+		if (LevelGeom != NULL && LevelGeom->Num() > 0)
+		{
+			TNavStatArray<FVector> Verts;
+			TNavStatArray<int32> Faces;
+			// For every ULevel in World take its pre-generated static geometry vertex soup
+			TransformVertexSoupToRecast(*LevelGeom, Verts, Faces);
+
+			IndexBuffer.Reserve(IndexBuffer.Num() + Faces.Num());
+			CoordBuffer.Reserve(CoordBuffer.Num() + Verts.Num() * 3);
+			for (int32 i = 0; i < Faces.Num(); i++)
+			{
+				IndexBuffer.Add(Faces[i] + CoordBuffer.Num() / 3);
+			}
+			for (int32 i = 0; i < Verts.Num(); i++)
+			{
+				CoordBuffer.Add(Verts[i].X);
+				CoordBuffer.Add(Verts[i].Y);
+				CoordBuffer.Add(Verts[i].Z);
+			}
+		}
+	}
+
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	IFileHandle* FileHandle = PlatformFile.OpenWrite(*(SaveFilePath[0]));
+	if (!FileHandle)
+	{
+		err = FText::FromString(TEXT("ExportNavArea Failed , Create file faied"));
+		return false;
+	}
+
+	for (int32 Index = 0; Index < CoordBuffer.Num(); Index += 3)
+	{
+		FString LineToSave = FString::Printf(TEXT("v %f %f %f\n"), CoordBuffer[Index + 0] * UnitScaling, CoordBuffer[Index + 1] * UnitScaling, CoordBuffer[Index + 2] * UnitScaling);
+		auto AnsiLineToSave = StringCast<ANSICHAR>(*LineToSave);
+		FileHandle->Write((const uint8*)AnsiLineToSave.Get(), AnsiLineToSave.Length());
+	}
+
+	for (int32 Index = 0; Index < IndexBuffer.Num(); Index += 3)
+	{
+		FString LineToSave = FString::Printf(TEXT("f %d %d %d\n"), IndexBuffer[Index + 0] + 1, IndexBuffer[Index + 1] + 1, IndexBuffer[Index + 2] + 1);
+		auto AnsiLineToSave = StringCast<ANSICHAR>(*LineToSave);
+		FileHandle->Write((const uint8*)AnsiLineToSave.Get(), AnsiLineToSave.Length());
+	}
+
+	FileHandle->Flush();
+
+	if (FileHandle)
+		delete FileHandle;
 
 	return true;
 }
@@ -153,12 +320,13 @@ bool NavMeshExporter::ExportNavGeom(FText& err)
 bool NavMeshExporter::ExportTileCache(FText& err)
 {
 	bool ret = false;
+	UWorld* World = GEditor->GetEditorWorldContext().World();
 
 	TArray<FString> SaveFilePath;
 	FDesktopPlatformModule::Get()->SaveFileDialog(NULL,
 		TEXT("Choose A Path to Save The Navmesh"),
 		TEXT(""),
-		GEditor->GetEditorWorldContext().World()->GetMapName(),
+		World->GetMapName(),
 		TEXT("Tilecache File|*.cache"),
 		0,
 		SaveFilePath
@@ -170,7 +338,6 @@ bool NavMeshExporter::ExportTileCache(FText& err)
 		return false;
 	}
 
-	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 	ANavigationData* NavData = NavSystem->GetDefaultNavDataInstance();
 	if (NavData == NULL)
@@ -255,6 +422,7 @@ bool NavMeshExporter::ExportTileCache(FText& err)
 
 	// Store tiles.
 	FastLZCompressor compressor;
+	//DummyCompressor compressor;
 	int index = 0;
 	for (const auto& tilecacheArray : *tilecacheMap)
 	{
@@ -467,16 +635,17 @@ FORCEINLINE void GrowConvexHull(const float ExpandBy, const TArray<FVector>& Ver
 	}
 }
 
-bool NavMeshExporter::ExportNavArea(FText& err)
+bool NavMeshExporter::ExportGeomSet(FText& err)
 {
 	bool ret = false;
+	UWorld* World = GEditor->GetEditorWorldContext().World();
 
 	TArray<FString> SaveFilePath;
 	FDesktopPlatformModule::Get()->SaveFileDialog(NULL,
 		TEXT("Choose A Path to Save The Navmesh"),
 		TEXT(""),
-		GEditor->GetEditorWorldContext().World()->GetMapName(),
-		TEXT("Tilecache File|*.obst"),
+		World->GetMapName(),
+		TEXT("GeomSet File|*.gset"),
 		0,
 		SaveFilePath
 	);
@@ -487,7 +656,6 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 		return false;
 	}
 
-	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 	ANavigationData* _NavData = NavSys->GetDefaultNavDataInstance();
 	if (_NavData == NULL)
@@ -515,10 +683,23 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 	};
 	TArray<FAreaExportData> AreaExport;
 
+	struct FOffMeshLinkData
+	{
+		FVector vertsA0;
+		FVector vertsB0;
+		float radius;
+		int dir;
+		int area;
+		int flag;
+		int userID;
+	};
+	TArray<FOffMeshLinkData> OffMeshLinkExport;
+
 	for (FNavigationOctree::TConstElementBoxIterator<FNavigationOctree::DefaultStackAllocator> It(*NavSys->GetNavOctree(), TotalBounds);
 		It.HasPendingElements();
 		It.Advance())
 	{
+		// obst
 		const FNavigationOctreeElement& Element = It.GetCurrentElement();
 		const TArray<FAreaNavModifier>& AreaMods = Element.Data->Modifiers.GetAreas();
 		for (int32 i = 0; i < AreaMods.Num(); i++)
@@ -540,6 +721,58 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 				AreaExport.Add(ExportInfo);
 			}
 		}
+
+		// offmesh link
+		TArray<FSimpleLinkNavModifier> OffmeshLinks;
+		const FNavDataConfig& OwnerNavDataConfig = NavDataGenerator->GetOwner()->GetConfig();
+		const FRecastNavMeshCachedData& AdditionalCachedData = NavDataGenerator->GetAdditionalCachedData();
+		const FCompositeNavModifier Modifier = Element.GetModifierForAgent(&OwnerNavDataConfig);
+		if (!Modifier.IsEmpty())
+		{
+			// append all offmesh links (not included in compress layers)
+			OffmeshLinks.Append(Modifier.GetSimpleLinks());
+
+			// evaluate custom links
+			const FCustomLinkNavModifier* LinkModifier = Modifier.GetCustomLinks().GetData();
+			for (int32 i = 0; i < Modifier.GetCustomLinks().Num(); i++, LinkModifier++)
+			{
+				FSimpleLinkNavModifier SimpleLinkCollection(UNavLinkDefinition::GetLinksDefinition(LinkModifier->GetNavLinkClass()), LinkModifier->LocalToWorld);
+				OffmeshLinks.Add(SimpleLinkCollection);
+			}
+
+			// export
+			for (int32 i = 0; i < OffmeshLinks.Num(); ++i)
+			{
+				for (int32 j = 0; j < OffmeshLinks[i].Links.Num(); j++)
+				{
+					FOffMeshLinkData ExportInfo;
+					const FNavigationLink& Link = OffmeshLinks[i].Links[j];
+
+					// not doing anything to link's points order - should be already ordered properly by link processor
+					ExportInfo.vertsA0 = OffmeshLinks[i].LocalToWorld.TransformPosition(Link.Left);
+					ExportInfo.vertsB0 = OffmeshLinks[i].LocalToWorld.TransformPosition(Link.Right);
+					ExportInfo.radius = Link.SnapRadius;
+					ExportInfo.userID = Link.UserId;
+					ExportInfo.dir = Link.Direction == ENavLinkDirection::BothWays ? 1 : 0;
+
+					UClass* AreaClass = Link.GetAreaClass();
+					const int32* AreaID = AdditionalCachedData.AreaClassToIdMap.Find(AreaClass);
+					if (AreaID != NULL)
+					{
+						ExportInfo.area = *AreaID;
+						ExportInfo.flag = AdditionalCachedData.FlagsPerOffMeshLinkArea[*AreaID];
+					}
+					else
+					{
+						ExportInfo.area = 0;
+						ExportInfo.flag = 0;
+						UE_LOG(LogNavigation, Warning, TEXT("FRecastTileGenerator: Trying to use undefined area class while defining Off-Mesh links! (%s)"), *GetNameSafe(AreaClass));
+					}
+
+					OffMeshLinkExport.Add(ExportInfo);
+				}
+			}
+		}
 	}
 
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
@@ -550,32 +783,40 @@ bool NavMeshExporter::ExportNavArea(FText& err)
 		return false;
 	}
 
-	FString AreaExportStr = TEXT("\n# Area export\n");
+	FString stringBuffer = World->GetMapName();
+
+	stringBuffer = FString::Printf(TEXT("f Meshes/%s.obj\n"), *World->GetMapName());
+	auto stringData = StringCast<ANSICHAR>(*stringBuffer);
+	FileHandle->Write((const uint8*)stringData.Get(), stringData.Length());
+
+	for (int32 i = 0; i < OffMeshLinkExport.Num(); i++)
+	{
+		const FOffMeshLinkData& ExportInfo = OffMeshLinkExport[i];
+		FVector vertsA0 = Unreal2RecastPoint(ExportInfo.vertsA0) * UnitScaling;
+		FVector vertsB0 = Unreal2RecastPoint(ExportInfo.vertsB0) * UnitScaling;
+		stringBuffer = FString::Printf(TEXT("c %f %f %f %f %f %f %f %d %d %d\n"),
+			vertsA0.X, vertsA0.Y, vertsA0.Z,
+			vertsB0.X, vertsB0.Y, vertsB0.Z,
+			ExportInfo.radius * UnitScaling, ExportInfo.dir, ExportInfo.area, ExportInfo.flag
+			);
+		auto stringData = StringCast<ANSICHAR>(*stringBuffer);
+		FileHandle->Write((const uint8*)stringData.Get(), stringData.Length());
+	}
 
 	for (int32 i = 0; i < AreaExport.Num(); i++)
 	{
 		const FAreaExportData& ExportInfo = AreaExport[i];
-		AreaExportStr += FString::Printf(TEXT("\nae %s %d %d %f %f\n"), *ExportInfo.Name,
-			ExportInfo.AreaId, ExportInfo.Convex.Points.Num(), ExportInfo.Convex.MinZ * UnitScaling, ExportInfo.Convex.MaxZ * UnitScaling);
+		stringBuffer = FString::Printf(TEXT("v %d %d %f %f\n"),
+			ExportInfo.Convex.Points.Num(), ExportInfo.AreaId, ExportInfo.Convex.MinZ * UnitScaling, ExportInfo.Convex.MaxZ * UnitScaling);
 
 		for (int32 iv = 0; iv < ExportInfo.Convex.Points.Num(); iv++)
 		{
-			FVector Pt = Unreal2RecastPoint(ExportInfo.Convex.Points[iv]);
-			AreaExportStr += FString::Printf(TEXT("%f %f %f\n"), Pt.X * UnitScaling, Pt.Y * UnitScaling, Pt.Z * UnitScaling);
+			FVector Pt = Unreal2RecastPoint(ExportInfo.Convex.Points[iv]) * UnitScaling;
+			stringBuffer += FString::Printf(TEXT("%f %f %f\n"), Pt.X, Pt.Y, Pt.Z);
 		}
+		auto stringData = StringCast<ANSICHAR>(*stringBuffer);
+		FileHandle->Write((const uint8*)stringData.Get(), stringData.Length());
 	}
-
-	FString AdditionalData;
-
-	AdditionalData += FString::Printf(TEXT("# AgentHeight\n"));
-	AdditionalData += FString::Printf(TEXT("rd_agh %5.5f\n"), Config.AgentHeight * UnitScaling);
-	AdditionalData += FString::Printf(TEXT("# AgentRadius\n"));
-	AdditionalData += FString::Printf(TEXT("rd_agr %5.5f\n"), Config.AgentRadius * UnitScaling);
-
-	AdditionalData += AreaExportStr;
-
-	auto AnsiAdditionalData = StringCast<ANSICHAR>(*AdditionalData);
-	FileHandle->Write((const uint8*)AnsiAdditionalData.Get(), AnsiAdditionalData.Length());
 
 	FileHandle->Flush();
 	ret = true;
