@@ -105,7 +105,7 @@ void FRecastToolModule::NavDataAutoUpdate_Execute(const FGuid SessionInstanceID)
 {
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
-	UNavigationSystemV1::SetNavigationAutoUpdateEnabled(!NavSystem->GetIsNavigationAutoUpdateEnabled(), NavSystem);
+	//UNavigationSystemV1::SetNavigationAutoUpdateEnabled(!NavSystem->GetIsNavigationAutoUpdateEnabled(), NavSystem);
 }
 
 bool FRecastToolModule::NavDataAutoUpdate_CanExecute(const FGuid SessionInstanceID) const
@@ -118,7 +118,8 @@ ECheckBoxState FRecastToolModule::NavDataAutoUpdate_GetCheckState(const FGuid Se
 	UWorld* World = GEditor->GetEditorWorldContext().World();
 	UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 
-	return NavSystem->GetIsNavigationAutoUpdateEnabled() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	//return NavSystem->GetIsNavigationAutoUpdateEnabled() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	return ECheckBoxState::Unchecked;
 }
 // NavDataAutoUpdate End
 

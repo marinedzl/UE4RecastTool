@@ -15,15 +15,10 @@
 #include "GenericPlatformFile.h"
 #include "Detour/DetourCommon.h"
 #include "DetourTileCache/DetourTileCacheBuilder.h"
-#include "fastlz.h"
-/*
-#define LZ4_DISABLE_DEPRECATE_WARNINGS
-#include "lz4.h"
-*/
 
 namespace
 {
-	const float UnitScaling = 0.01f;
+	const float UnitScaling = 1.0f;
 }
 
 namespace Recast2
@@ -111,52 +106,6 @@ namespace Recast
 			return DT_SUCCESS;
 		}
 	};
-
-	struct FastLZCompressor : public dtTileCacheCompressor
-	{
-		virtual int maxCompressedSize(const int bufferSize)
-		{
-			return (int)(bufferSize* 1.05f);
-		}
-
-		virtual dtStatus compress(const unsigned char* buffer, const int bufferSize,
-			unsigned char* compressed, const int maxCompressedSize, int* compressedSize)
-		{
-			*compressedSize = fastlz_compress((const void *const)buffer, bufferSize, compressed);
-			return DT_SUCCESS;
-		}
-
-		virtual dtStatus decompress(const unsigned char* compressed, const int compressedSize,
-			unsigned char* buffer, const int maxBufferSize, int* bufferSize)
-		{
-			*bufferSize = fastlz_decompress(compressed, compressedSize, buffer, maxBufferSize);
-			return *bufferSize < 0 ? DT_FAILURE : DT_SUCCESS;
-		}
-	};
-
-	/*
-	struct LZ4Compressor : public dtTileCacheCompressor
-	{
-		virtual int maxCompressedSize(const int bufferSize)
-		{
-			return LZ4_compressBound(bufferSize);
-		}
-
-		virtual dtStatus compress(const unsigned char* buffer, const int bufferSize,
-			unsigned char* compressed, const int maxCompressedSize, int* compressedSize)
-		{
-			*compressedSize = LZ4_compress_default((const char *const)buffer, (char*)compressed, bufferSize, maxCompressedSize);
-			return DT_SUCCESS;
-		}
-
-		virtual dtStatus decompress(const unsigned char* compressed, const int compressedSize,
-			unsigned char* buffer, const int maxBufferSize, int* bufferSize)
-		{
-			*bufferSize = LZ4_decompress_safe((const char*)compressed, (char*)buffer, compressedSize, maxBufferSize);
-			return *bufferSize < 0 ? DT_FAILURE : DT_SUCCESS;
-		}
-	}; 
-	*/
 }
 
 using namespace Recast;
@@ -421,8 +370,7 @@ bool NavMeshExporter::ExportTileCache(FText& err)
 	FileHandle->Write((const uint8*)&fileHeader, sizeof(fileHeader));
 
 	// Store tiles.
-	FastLZCompressor compressor;
-	//DummyCompressor compressor;
+	DummyCompressor compressor;
 	int index = 0;
 	for (const auto& tilecacheArray : *tilecacheMap)
 	{
